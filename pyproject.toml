@@ -1,0 +1,26 @@
+[tool.poetry]
+name = "pef-analyzer"
+version = "0.1.0"
+description = "Software educacional para analise de estruturas isostaticas e hiperestaticas em 2D"
+authors = ["Engenheiro Estrutural"]
+readme = "README.md"
+packages = [{include = "pef_analyzer"}]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+sympy = "^1.12"
+numpy = "^1.26"
+matplotlib = "^3.8"
+pyqt6 = "^6.6"
+scipy = "^1.11"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4"
+pytest-cov = "^4.1"
+black = "^23.0"
+flake8 = "^6.0"
+mypy = "^1.7"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
