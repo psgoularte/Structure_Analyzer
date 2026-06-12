@@ -1,1 +1,1 @@
-"""Testes do PEF Analyzer."""
+# This file is intentionally left blank.
