@@ -1,6 +1,10 @@
 """
 Representação de carga. Para cargas definidas por função, 'expr' é uma expressão em python em termos de t (posição normalizada 0..1).
 Ex: '100 * t' ou '50' (constante). Avaliação feita em ambiente restrito com math.
+
+Units:
+- Point loads: kN (kiloNewtons) for vx, vy, vz components
+- Distributed loads: kN/m (kiloNewtons per meter) for expression values
 """
 from typing import Optional, Dict, Any
 import math
@@ -18,11 +22,19 @@ def eval_expr(expr: str, t: float) -> float:
 
 
 def make_point_load(vx=0.0, vy=0.0, vz=0.0, expr: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Create a point load with force components in kN.
+    vx, vy, vz: force components in kN (kiloNewtons)
+    """
     return {"type": "point", "vx": float(vx), "vy": float(vy), "vz": float(vz), "expr": expr}
 
 
 def make_dist_load(expr: str, direction: str = "vy") -> Dict[str, Any]:
-    # expr é função de t (0..1)
+    """
+    Create a distributed load with expression in kN/m.
+    expr: function of t (0..1) returning load intensity in kN/m (kiloNewtons per meter)
+    direction: 'vx', 'vy', or 'vz' for load direction
+    """
     return {"type": "dist", "expr": expr, "direction": direction}
 
 
