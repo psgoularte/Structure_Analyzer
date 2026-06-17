@@ -21,6 +21,23 @@ def eval_expr(expr: str, t: float) -> float:
         return 0.0
 
 
+def validate_expr(expr: str) -> str:
+    """Validate a load expression; raise ValueError with a clear message if invalid."""
+    if not expr or not expr.strip():
+        raise ValueError("Expression cannot be empty")
+    try:
+        eval(expr.strip(), {"__builtins__": {}}, {**_SAFE_MATH, "t": 0.5})
+        return expr.strip()
+    except SyntaxError as e:
+        raise ValueError(f"Syntax error: {e.msg}")
+    except NameError as e:
+        raise ValueError(f"Unknown name (only 't' and math functions allowed): {e}")
+    except ZeroDivisionError:
+        raise ValueError("Expression causes division by zero at t=0.5 (check divisors)")
+    except Exception as e:
+        raise ValueError(f"Invalid expression: {e}")
+
+
 def make_point_load(vx=0.0, vy=0.0, vz=0.0, expr: Optional[str] = None) -> Dict[str, Any]:
     """
     Create a point load with force components in kN.

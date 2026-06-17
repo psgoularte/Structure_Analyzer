@@ -51,6 +51,16 @@ class Canvas(QWidget):
         return nid
 
     def add_bar(self, ni: int, nj: int, area: float = 1.0, e: float = 210e9) -> int:
+        if ni < 0 or ni >= len(self.nodes):
+            raise ValueError(f"Node {ni} does not exist (have {len(self.nodes)} nodes).")
+        if nj < 0 or nj >= len(self.nodes):
+            raise ValueError(f"Node {nj} does not exist (have {len(self.nodes)} nodes).")
+        if ni == nj:
+            raise ValueError("Bar must connect two different nodes.")
+        n_i, n_j = self.nodes[ni], self.nodes[nj]
+        L2 = (n_j.x-n_i.x)**2 + (n_j.y-n_i.y)**2 + (n_j.z-n_i.z)**2
+        if L2 < 1e-12:
+            raise ValueError(f"Nodes {ni} and {nj} are at the same position — bar has zero length.")
         bid = len(self.bars)
         b = Bar(bid, ni, nj, area, e)
         self.bars.append(b)
@@ -60,45 +70,48 @@ class Canvas(QWidget):
         return bid
 
     def add_support(self, node_index: int, support_type: str):
-        if 0 <= node_index < len(self.nodes):
-            self.nodes[node_index].support = support_type
-            self._recalculate_all_efforts()
-            self.update()
+        if node_index < 0 or node_index >= len(self.nodes):
+            raise ValueError(f"Node {node_index} does not exist (have {len(self.nodes)} nodes).")
+        valid_types = {"none", "roller", "pinned", "fixed"}
+        if support_type not in valid_types:
+            raise ValueError(f"Support type '{support_type}' is not valid. Use: {sorted(valid_types)}.")
+        self.nodes[node_index].support = support_type
+        self._recalculate_all_efforts()
+        self.update()
 
     def add_point_load(self, bar_index: int, vx=0.0, vy=0.0, vz=0.0, distance=0.0):
         """Add point load on a bar at specified distance from lower index node."""
-        if 0 <= bar_index < len(self.bars):
-            bar = self.bars[bar_index]
-            # Store load with distance from node i (lower index)
-            bar.loads.append({
-                "type": "point",
-                "vx": vx,
-                "vy": vy,
-                "vz": vz,
-                "distance": distance,
-                "from_node": bar.node_i  # Always from lower index node
-            })
-            self._recalculate_all_efforts()
-            self.update()
+        if bar_index < 0 or bar_index >= len(self.bars):
+            raise ValueError(f"Bar {bar_index} does not exist (have {len(self.bars)} bars).")
+        if distance < 0:
+            raise ValueError(f"Distance must be ≥ 0 (got {distance}).")
+        bar = self.bars[bar_index]
+        ni = self.nodes[bar.node_i]
+        nj = self.nodes[bar.node_j]
+        import math
+        L = math.sqrt((nj.x-ni.x)**2 + (nj.y-ni.y)**2 + (nj.z-ni.z)**2)
+        if distance > L + 1e-9:
+            raise ValueError(f"Distance {distance:.3f} m exceeds bar length {L:.3f} m.")
+        bar.loads.append({"type": "point", "vx": vx, "vy": vy, "vz": vz, "distance": distance, "from_node": bar.node_i})
+        self._recalculate_all_efforts()
+        self.update()
 
     def add_dist_load_to_bar(self, bar_index: int, expr: str, direction: str = "vy"):
-        if 0 <= bar_index < len(self.bars):
-            self.bars[bar_index].loads.append({"type": "dist", "expr": expr, "direction": direction})
-            self._recalculate_all_efforts()
-            self.update()
+        if bar_index < 0 or bar_index >= len(self.bars):
+            raise ValueError(f"Bar {bar_index} does not exist (have {len(self.bars)} bars).")
+        from ...core.load import validate_expr
+        validate_expr(expr)   # raises ValueError if invalid
+        self.bars[bar_index].loads.append({"type": "dist", "expr": expr, "direction": direction})
+        self._recalculate_all_efforts()
+        self.update()
 
     def add_node_moment(self, node_index: int, mx=0.0, my=0.0, mz=0.0):
         """Add moment to a node."""
-        if 0 <= node_index < len(self.nodes):
-            node = self.nodes[node_index]
-            node.loads.append({
-                "type": "moment",
-                "mx": mx,
-                "my": my,
-                "mz": mz
-            })
-            self._recalculate_all_efforts()
-            self.update()
+        if node_index < 0 or node_index >= len(self.nodes):
+            raise ValueError(f"Node {node_index} does not exist (have {len(self.nodes)} nodes).")
+        self.nodes[node_index].loads.append({"type": "moment", "mx": mx, "my": my, "mz": mz})
+        self._recalculate_all_efforts()
+        self.update()
 
     def _recalculate_all_efforts(self):
         """Recalculate efforts for all bars when any change occurs."""
@@ -430,11 +443,15 @@ class Canvas(QWidget):
                         self._draw_dist_load_visualization(painter, p1, p2, ld)
                 
                 # Draw point loads along bars
+                model_dx = nj.x - ni.x
+                model_dy = nj.y - ni.y
+                model_dz = nj.z - ni.z
+                model_length = math.sqrt(model_dx**2 + model_dy**2 + model_dz**2)
                 for ld in b.loads:
                     if ld.get("type") == "point":
                         distance = ld.get("distance", 0.0)
-                        if distance > 0.0:
-                            self._draw_point_load_on_bar(painter, p1, p2, ld, distance)
+                        t = min(distance / model_length, 1.0) if model_length > 0 else 0.0
+                        self._draw_point_load_on_bar(painter, p1, p2, ld, t, distance)
 
                 # Modern result labels with background
                 mid = QPointF((p1.x() + p2.x()) / 2.0, (p1.y() + p2.y()) / 2.0)
@@ -478,7 +495,7 @@ class Canvas(QWidget):
                     mx = ld.get("mx", 0.0)
                     my = ld.get("my", 0.0)
                     mz = ld.get("mz", 0.0)
-                    self._draw_moment_indicator(painter, p, mx, my, mz)
+                    self._draw_moment_indicator(painter, p, mx, my, mz, n)
 
         painter.end()
 
@@ -588,68 +605,65 @@ class Canvas(QWidget):
         painter.setBrush(QColor("#cdd6f4"))
         painter.drawEllipse(origin, 5, 5)
 
-    def _draw_moment_indicator(self, painter, pos, mx, my, mz):
-        """Draw moment indicator as curved arrows following coordinate system."""
-        total_moment = (mx**2 + my**2 + mz**2)**0.5
-        if total_moment < 1.0:
+    def _draw_moment_indicator(self, painter, pos, mx, my, mz, node):
+        """Draw moment indicator as double-headed straight arrows along rotation axes (mechanics standard)."""
+        if (mx**2 + my**2 + mz**2)**0.5 < 0.01:
             return
-        
-        arrow_len = max(30, min(60, total_moment * 0.3))
-        
-        # Draw moment arrows for each component
-        # Mx (moment about X axis) - represented as curved arrow in Y-Z plane
-        if abs(mx) > 0.1:
-            self._draw_curved_arrow(painter, pos, mx, "x", arrow_len)
-        
-        # My (moment about Y axis) - represented as curved arrow in X-Z plane
-        if abs(my) > 0.1:
-            self._draw_curved_arrow(painter, pos, my, "y", arrow_len)
-        
-        # Mz (moment about Z axis) - represented as curved arrow in X-Y plane
-        if abs(mz) > 0.1:
-            self._draw_curved_arrow(painter, pos, mz, "z", arrow_len)
 
-    def _draw_curved_arrow(self, painter, pos, magnitude, axis, length):
-        """Draw a curved arrow representing moment about an axis."""
-        # Color based on axis
-        if axis == "x":
-            color = QColor("#f38ba8")  # Red
-        elif axis == "y":
-            color = QColor("#a6e3a1")  # Green
-        else:  # z
-            color = QColor("#89b4fa")  # Blue
-        
-        painter.setPen(QPen(color, 2))
+        # Compute a model-space length that projects to ~55px on screen
+        moment_scale = 55.0 / self.scale if self.scale > 0 else 5.0
+
+        if abs(mx) > 0.01:
+            sign = 1 if mx > 0 else -1
+            end_pt = self.model_to_screen(node.x + sign * moment_scale, node.y, node.z)
+            self._draw_moment_vector_arrow(painter, pos, end_pt, QColor("#f38ba8"))
+            painter.setPen(QPen(QColor("#f38ba8")))
+            painter.setFont(QFont("Segoe UI", 8))
+            painter.drawText(QPointF(end_pt.x() + 5, end_pt.y() - 5), f"Mx:{mx:+.1f}")
+
+        if abs(my) > 0.01:
+            sign = 1 if my > 0 else -1
+            end_pt = self.model_to_screen(node.x, node.y + sign * moment_scale, node.z)
+            self._draw_moment_vector_arrow(painter, pos, end_pt, QColor("#a6e3a1"))
+            painter.setPen(QPen(QColor("#a6e3a1")))
+            painter.setFont(QFont("Segoe UI", 8))
+            painter.drawText(QPointF(end_pt.x() + 5, end_pt.y() - 5), f"My:{my:+.1f}")
+
+        if abs(mz) > 0.01:
+            sign = 1 if mz > 0 else -1
+            end_pt = self.model_to_screen(node.x, node.y, node.z + sign * moment_scale)
+            self._draw_moment_vector_arrow(painter, pos, end_pt, QColor("#89b4fa"))
+            painter.setPen(QPen(QColor("#89b4fa")))
+            painter.setFont(QFont("Segoe UI", 8))
+            painter.drawText(QPointF(end_pt.x() + 5, end_pt.y() - 5), f"Mz:{mz:+.1f}")
+
+    def _draw_moment_vector_arrow(self, painter, start, end, color):
+        """Double-headed straight arrow — standard mechanics notation for moment vectors."""
+        dx = end.x() - start.x()
+        dy = end.y() - start.y()
+        length = (dx*dx + dy*dy)**0.5
+        if length < 1e-6:
+            return
+        ux, uy = dx / length, dy / length
+        head = 10
+        px, py = -uy * head * 0.5, ux * head * 0.5
+
+        painter.setPen(QPen(color, 3))
+        painter.drawLine(start, end)
         painter.setBrush(color)
-        
-        # Draw curved arrow
-        # Simplified: draw arc with arrow head
-        rect = QRectF(pos.x() - length/2, pos.y() - length/2, length, length)
-        start_angle = 0
-        span_angle = 90 if magnitude > 0 else -90
-        
-        painter.drawArc(rect, start_angle * 16, span_angle * 16)
-        
-        # Arrow head at end of arc
-        head_size = 8
-        # Calculate end point of arc
-        end_angle = start_angle + span_angle
-        end_x = pos.x() + (length/2) * math.cos(math.radians(end_angle))
-        end_y = pos.y() - (length/2) * math.sin(math.radians(end_angle))  # Screen Y inverted
-        
-        # Direction tangent to arc
-        dir_x = -math.sin(math.radians(end_angle))
-        dir_y = -math.cos(math.radians(end_angle))
-        
-        perp_x = -dir_y * head_size * 0.5
-        perp_y = dir_x * head_size * 0.5
-        
-        arrow_head = QPolygonF([
-            QPointF(end_x, end_y),
-            QPointF(end_x - dir_x * head_size + perp_x, end_y - dir_y * head_size + perp_y),
-            QPointF(end_x - dir_x * head_size - perp_x, end_y - dir_y * head_size - perp_y)
-        ])
-        painter.drawPolygon(arrow_head)
+
+        # Arrowhead at the far end
+        painter.drawPolygon(QPolygonF([
+            end,
+            QPointF(end.x() - ux * head + px, end.y() - uy * head + py),
+            QPointF(end.x() - ux * head - px, end.y() - uy * head - py),
+        ]))
+        # Arrowhead at the near end (double-headed = moment vector convention)
+        painter.drawPolygon(QPolygonF([
+            start,
+            QPointF(start.x() + ux * head + px, start.y() + uy * head + py),
+            QPointF(start.x() + ux * head - px, start.y() + uy * head - py),
+        ]))
 
     def _draw_result_label(self, painter, pos, results, bar_id):
         """Draw detailed effort diagram on bar with all 3D effort types and max values."""
@@ -680,7 +694,7 @@ class Canvas(QWidget):
         
         # Position label above bar with offset (increased distance for better visualization)
         label_x = pos.x() - max_width / 2
-        label_y = pos.y() - text_height - 40
+        label_y = pos.y() - text_height - 90
         
         bg_rect = QRectF(label_x - 8, label_y - 8, max_width + 16, text_height + 16)
         painter.setPen(Qt.PenStyle.NoPen)
@@ -856,303 +870,187 @@ class Canvas(QWidget):
         painter.setBrush(color)
         painter.drawPolygon(arrow_head)
 
+    def _force_screen_dir(self, vx, vy, vz):
+        """Unit vector in screen space for force (vx,vy,vz), using the current 3D rotation."""
+        total = (vx**2 + vy**2 + vz**2)**0.5
+        if total < 1e-9:
+            return 0.0, 1.0
+        xr, yr, zr = self._rotate_point(vx / total, vy / total, vz / total)
+        dx = xr
+        dy = -(yr + zr * self.projection_scale)
+        dlen = (dx**2 + dy**2)**0.5
+        if dlen < 1e-9:
+            return 0.0, 1.0
+        return dx / dlen, dy / dlen
+
     def _draw_load_indicator(self, painter, pos, vx, vy, vz):
-        """Draw modern load indicator with arrow in correct direction."""
-        # Load text
+        """Draw load indicator with arrow following the 3D-rotated force direction."""
         load_text = f"({vx:.0f}, {vy:.0f}, {vz:.0f})"
         painter.setPen(QPen(QColor("#f38ba8")))
         painter.setFont(QFont("Segoe UI", 8))
         painter.drawText(QPointF(pos.x() + 8, pos.y() + 20), load_text)
-        
-        # Draw arrow for significant loads
+
         total_load = (vx**2 + vy**2 + vz**2)**0.5
-        if total_load > 10:
-            arrow_len = max(12, min(35, 8 * self.scale))
-            
-            # Calculate arrow direction based on force components
-            # Use 2D projection for visualization (x, y components)
-            # Z component affects color to indicate direction
-            dx = vx
-            dy = -vy  # Negative because screen Y is inverted (up is negative)
-            
-            # Normalize direction
-            xy_magnitude = (dx*dx + dy*dy)**0.5
-            if xy_magnitude > 0:
-                dx = dx / xy_magnitude
-                dy = dy / xy_magnitude
-            else:
-                # If no x/y component, default to showing z direction
-                dx = 0
-                dy = -1 if vz > 0 else 1
-            
-            # Arrow color based on magnitude and z direction
+        if total_load > 0.01:
+            arrow_len = 55
+            dx, dy = self._force_screen_dir(vx, vy, vz)
+
             if total_load > 200:
-                arrow_color = QColor("#f38ba8")  # Red for high loads
+                arrow_color = QColor("#f38ba8")
             elif total_load > 100:
-                arrow_color = QColor("#fab387")  # Orange for medium loads
+                arrow_color = QColor("#fab387")
             else:
-                arrow_color = QColor("#89b4fa")  # Blue for low loads
-            
-            # Modify color based on z direction (positive z = lighter, negative z = darker)
-            if vz != 0:
-                if vz > 0:
-                    arrow_color = arrow_color.lighter(120)
-                else:
-                    arrow_color = arrow_color.darker(120)
-            
-            # Calculate arrow end position
+                arrow_color = QColor("#89b4fa")
+
             end_x = pos.x() + dx * arrow_len
             end_y = pos.y() + dy * arrow_len
-            
+
             painter.setPen(QPen(arrow_color, 2))
             painter.setBrush(arrow_color)
             painter.drawLine(pos, QPointF(end_x, end_y))
-            
-            # Arrow head
+
             head_size = 8
-            # Calculate perpendicular for arrow head
             px = -dy * head_size * 0.5
             py = dx * head_size * 0.5
-            
-            arrow_head = QPolygonF([
+            painter.drawPolygon(QPolygonF([
                 QPointF(end_x, end_y),
                 QPointF(end_x - dx * head_size + px, end_y - dy * head_size + py),
-                QPointF(end_x - dx * head_size - px, end_y - dy * head_size - py)
-            ])
-            painter.drawPolygon(arrow_head)
+                QPointF(end_x - dx * head_size - px, end_y - dy * head_size - py),
+            ]))
 
     def _draw_dist_load_visualization(self, painter, p1, p2, load_data):
-        """Draw distributed load visualization with connecting bar from node i to node j."""
+        """Draw distributed load as parallel arrows pointing in force direction, with load line."""
         expr = load_data.get("expr", "0")
         direction = load_data.get("direction", "vy")
-        
-        # Calculate bar direction
+
         dx = p2.x() - p1.x()
         dy = p2.y() - p1.y()
-        length = (dx*dx + dy*dy)**0.5
-        if length < 1e-6:
+        if (dx*dx + dy*dy)**0.5 < 1e-6:
             return
-        
-        # Color based on direction
-        if direction == "vx":
-            arrow_color = QColor("#f38ba8")  # Red
-        elif direction == "vy":
-            arrow_color = QColor("#a6e3a1")  # Green
-        else:
-            arrow_color = QColor("#89b4fa")  # Blue
-        
-        # Calculate function values at node i (t=0) and node j (t=1)
+
+        color = (QColor("#f38ba8") if direction == "vx" else
+                 QColor("#a6e3a1") if direction == "vy" else
+                 QColor("#89b4fa"))
+
+        # Sample magnitudes for proportional scaling
+        from ...core.load import eval_expr as _eval
+        NUM = 9
+        t_vals = [i / (NUM - 1) for i in range(NUM)]
         try:
-            from ...core.load import eval_expr
-            mag_i = eval_expr(expr, 0.0)
-            mag_j = eval_expr(expr, 1.0)
-        except:
-            mag_i = 0.0
-            mag_j = 20.0
-        
-        # Calculate arrow tip positions at nodes
-        if direction == "vx":
-            tip_i_x = p1.x() + mag_i * 0.5
-            tip_i_y = p1.y()
-            tip_j_x = p2.x() + mag_j * 0.5
-            tip_j_y = p2.y()
-        elif direction == "vy":
-            tip_i_x = p1.x()
-            tip_i_y = p1.y() - mag_i * 0.5
-            tip_j_x = p2.x()
-            tip_j_y = p2.y() - mag_j * 0.5
-        else:  # vz
-            tip_i_x = p1.x()
-            tip_i_y = p1.y() - mag_i * 0.5
-            tip_j_x = p2.x()
-            tip_j_y = p2.y() - mag_j * 0.5
-        
-        # Draw connecting bar from node i to node j
-        painter.setPen(QPen(arrow_color, 2))
-        painter.drawLine(QPointF(tip_i_x, tip_i_y), QPointF(tip_j_x, tip_j_y))
-        
-        # Draw arrow at node i tip
-        painter.setPen(QPen(arrow_color, 2))
-        painter.setBrush(arrow_color)
-        painter.drawLine(QPointF(tip_i_x, tip_i_y), p1)
-        head_size = 8
-        dir_x = p1.x() - tip_i_x
-        dir_y = p1.y() - tip_i_y
-        dir_len = (dir_x*dir_x + dir_y*dir_y)**0.5
-        if dir_len > 0:
-            dir_x /= dir_len
-            dir_y /= dir_len
-            perp_x = -dir_y * head_size * 0.5
-            perp_y = dir_x * head_size * 0.5
-            arrow_head = QPolygonF([
-                p1,
-                QPointF(p1.x() - dir_x * head_size + perp_x, 
-                        p1.y() - dir_y * head_size + perp_y),
-                QPointF(p1.x() - dir_x * head_size - perp_x, 
-                        p1.y() - dir_y * head_size - perp_y)
-            ])
-            painter.drawPolygon(arrow_head)
-        
-        # Draw arrow at node j tip
-        painter.setPen(QPen(arrow_color, 2))
-        painter.setBrush(arrow_color)
-        painter.drawLine(QPointF(tip_j_x, tip_j_y), p2)
-        dir_x = p2.x() - tip_j_x
-        dir_y = p2.y() - tip_j_y
-        dir_len = (dir_x*dir_x + dir_y*dir_y)**0.5
-        if dir_len > 0:
-            dir_x /= dir_len
-            dir_y /= dir_len
-            perp_x = -dir_y * head_size * 0.5
-            perp_y = dir_x * head_size * 0.5
-            arrow_head = QPolygonF([
-                p2,
-                QPointF(p2.x() - dir_x * head_size + perp_x, 
-                        p2.y() - dir_y * head_size + perp_y),
-                QPointF(p2.x() - dir_x * head_size - perp_x, 
-                        p2.y() - dir_y * head_size - perp_y)
-            ])
-            painter.drawPolygon(arrow_head)
-        
-        # Draw arrows at multiple points along the bar
-        num_arrows = 7
-        for i in range(num_arrows):
-            t = (i + 1) / (num_arrows + 1)
-            base_x = p1.x() + dx * t
-            base_y = p1.y() + dy * t
-            
-            # Calculate arrow length based on expression
-            try:
-                from ...core.load import eval_expr
-                magnitude = eval_expr(expr, t)
-                arrow_len = max(30, min(60, abs(magnitude) * 1.0))
-            except:
-                magnitude = 20
-                arrow_len = 40
-            
-            # Arrow tip position based on force direction (global coordinate system)
-            if direction == "vx":
-                tip_x = base_x + magnitude * 0.5
-                tip_y = base_y
-            elif direction == "vy":
-                tip_x = base_x
-                tip_y = base_y - magnitude * 0.5
-            else:  # vz
-                tip_x = base_x
-                tip_y = base_y - magnitude * 0.5
-            
-            tip_pos = QPointF(tip_x, tip_y)
-            base_pos = QPointF(base_x, base_y)
-            
-            # Draw arrow from tip to bar
-            painter.setPen(QPen(arrow_color, 2))
-            painter.setBrush(arrow_color)
-            painter.drawLine(tip_pos, base_pos)
-            
-            # Arrow head at bar (base position)
-            head_size = 8
-            # Direction from tip to bar
-            dir_x = base_x - tip_x
-            dir_y = base_y - tip_y
-            dir_len = (dir_x*dir_x + dir_y*dir_y)**0.5
-            if dir_len > 0:
-                dir_x /= dir_len
-                dir_y /= dir_len
-                # Perpendicular for arrow head
-                perp_x = -dir_y * head_size * 0.5
-                perp_y = dir_x * head_size * 0.5
-                
-                arrow_head = QPolygonF([
-                    base_pos,
-                    QPointF(base_pos.x() - dir_x * head_size + perp_x, 
-                            base_pos.y() - dir_y * head_size + perp_y),
-                    QPointF(base_pos.x() - dir_x * head_size - perp_x, 
-                            base_pos.y() - dir_y * head_size - perp_y)
-                ])
-                painter.drawPolygon(arrow_head)
-        
-        # Draw label showing expression
-        painter.setPen(QPen(arrow_color))
-        painter.setFont(QFont("Segoe UI", 8))
+            mags = [_eval(expr, t) for t in t_vals]
+        except Exception:
+            mags = [20.0] * NUM
+
+        max_abs = max(abs(m) for m in mags)
+        if max_abs < 0.01:
+            return
+
+        ARROW_MAX = 50  # pixels for the largest arrow
+
+        # Screen-space direction of the force vector, accounting for 3D rotation
+        _dir_model = {"vx": (1,0,0), "vy": (0,1,0), "vz": (0,0,1), "perpendicular": (0,1,0)}
+        gvx, gvy, gvz = _dir_model.get(direction, (0,1,0))
+        fsx, fsy = self._force_screen_dir(gvx, gvy, gvz)
+
+        def tip_offset(mag):
+            """Screen-space offset from bar to arrow tail.
+            Zero for zero-magnitude loads so the load line traces the true function shape."""
+            if abs(mag) < 0.001 * max_abs:
+                return 0.0, 0.0
+            scaled = ARROW_MAX * abs(mag) / max_abs
+            s = 1 if mag >= 0 else -1
+            # Tail is opposite to force direction: tail = bar_pos - s * force_dir * scaled
+            return -s * fsx * scaled, -s * fsy * scaled
+
+        def draw_arrow(tip_pt, base_pt):
+            """Arrow from tail (tip_pt, no head) → bar (base_pt, arrowhead)."""
+            dir_x = base_pt.x() - tip_pt.x()
+            dir_y = base_pt.y() - tip_pt.y()
+            dlen = (dir_x**2 + dir_y**2)**0.5
+            if dlen < 0.5:
+                return
+            dir_x /= dlen
+            dir_y /= dlen
+            head = 8
+            px, py = -dir_y * head * 0.5, dir_x * head * 0.5
+            painter.setPen(QPen(color, 2))
+            painter.setBrush(color)
+            painter.drawLine(tip_pt, base_pt)
+            painter.drawPolygon(QPolygonF([
+                base_pt,
+                QPointF(base_pt.x() - dir_x * head + px, base_pt.y() - dir_y * head + py),
+                QPointF(base_pt.x() - dir_x * head - px, base_pt.y() - dir_y * head - py),
+            ]))
+
+        # Draw all arrows and collect tail positions for the load line
+        tail_pts = []
+        for i, t in enumerate(t_vals):
+            bx = p1.x() + dx * t
+            by = p1.y() + dy * t
+            ox, oy = tip_offset(mags[i])
+            tail = QPointF(bx + ox, by + oy)
+            if abs(ox) + abs(oy) > 0.5:   # skip zero-load positions (tail = bar pos)
+                draw_arrow(tail, QPointF(bx, by))
+            tail_pts.append(tail)
+
+        # Load line connecting all tails
+        painter.setPen(QPen(color, 2))
+        for k in range(len(tail_pts) - 1):
+            painter.drawLine(tail_pts[k], tail_pts[k + 1])
+
+        # Label near midpoint
+        ox_mid, oy_mid = tip_offset(mags[NUM // 2])
         mid_x = (p1.x() + p2.x()) / 2.0
         mid_y = (p1.y() + p2.y()) / 2.0
-        label_pos = QPointF(mid_x + 30, mid_y - 30)
-        painter.drawText(label_pos, f"{expr} ({direction})")
+        painter.setPen(QPen(color))
+        painter.setFont(QFont("Segoe UI", 8))
+        painter.drawText(QPointF(mid_x + ox_mid + 8, mid_y + oy_mid - 4), f"{expr} ({direction})")
 
-    def _draw_point_load_on_bar(self, painter, p1, p2, load_data, distance):
+    def _draw_point_load_on_bar(self, painter, p1, p2, load_data, t, distance):
         """Draw point load at specific position along bar using global coordinate system."""
         vx = load_data.get("vx", 0.0)
         vy = load_data.get("vy", 0.0)
         vz = load_data.get("vz", 0.0)
-        
-        # Calculate bar direction and length
+
+        # Calculate bar direction in screen space
         dx = p2.x() - p1.x()
         dy = p2.y() - p1.y()
         length = (dx*dx + dy*dy)**0.5
         if length < 1e-6:
             return
-        
-        # Calculate position along bar using actual coordinate distance (in meters)
-        # distance is in coordinate units (meters), representing distance from node i
-        # t is the normalized position (0 to 1) based on actual distance
-        t = min(distance / length, 1.0) if length > 0 else 0.0
-        
-        # Calculate screen position for the load (exact position along bar)
-        # This gives the actual coordinate position
+
+        # t is the normalized position (0 to 1) computed from model coordinates
         load_x = p1.x() + dx * t
         load_y = p1.y() + dy * t
         load_pos = QPointF(load_x, load_y)
-        
-        # Draw load indicator using global coordinate system
+
         total_load = (vx**2 + vy**2 + vz**2)**0.5
-        if total_load > 1.0:
-            arrow_len = max(40, min(70, 18 * self.scale))
-            
-            # Arrow color based on magnitude
+        if total_load > 0.01:
+            arrow_len = 55
+            dir_x, dir_y = self._force_screen_dir(vx, vy, vz)
+
             if total_load > 200:
-                arrow_color = QColor("#f38ba8")  # Red for high loads
+                arrow_color = QColor("#f38ba8")
             elif total_load > 100:
-                arrow_color = QColor("#fab387")  # Orange for medium loads
+                arrow_color = QColor("#fab387")
             else:
-                arrow_color = QColor("#89b4fa")  # Blue for low loads
-            
-            # Calculate arrow direction based on force components (global coordinate system)
-            # Use 2D projection for visualization
-            dir_x = vx
-            dir_y = -vy  # Negative because screen Y is inverted
-            
-            # Normalize direction
-            xy_magnitude = (dir_x*dir_x + dir_y*dir_y)**0.5
-            if xy_magnitude > 0:
-                dir_x = dir_x / xy_magnitude
-                dir_y = dir_y / xy_magnitude
-            else:
-                # If no x/y component, default to showing z direction
-                dir_x = 0
-                dir_y = -1 if vz > 0 else 1
-            
-            # Arrow end position (following force direction)
+                arrow_color = QColor("#89b4fa")
+
             end_x = load_x + dir_x * arrow_len
             end_y = load_y + dir_y * arrow_len
-            
+
             painter.setPen(QPen(arrow_color, 2))
             painter.setBrush(arrow_color)
             painter.drawLine(load_pos, QPointF(end_x, end_y))
-            
-            # Arrow head
+
             head_size = 12
-            # Perpendicular for arrow head
             perp_x = -dir_y * head_size * 0.5
             perp_y = dir_x * head_size * 0.5
-            
-            arrow_head = QPolygonF([
+            painter.drawPolygon(QPolygonF([
                 QPointF(end_x, end_y),
-                QPointF(end_x - dir_x * head_size + perp_x, 
-                        end_y - dir_y * head_size + perp_y),
-                QPointF(end_x - dir_x * head_size - perp_x, 
-                        end_y - dir_y * head_size - perp_y)
-            ])
-            painter.drawPolygon(arrow_head)
+                QPointF(end_x - dir_x * head_size + perp_x, end_y - dir_y * head_size + perp_y),
+                QPointF(end_x - dir_x * head_size - perp_x, end_y - dir_y * head_size - perp_y),
+            ]))
         
         # Draw distance label showing coordinate distance from node i
         dist_text = f"{distance:.1f}m"
