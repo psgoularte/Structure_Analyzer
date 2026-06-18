@@ -38,4 +38,3 @@ class Renderer:
 
     def clear(self):
         self.scene.clear()
-"""

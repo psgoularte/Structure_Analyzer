@@ -30,7 +30,7 @@ class MainWindow(QMainWindow):
         
         # Controls panel (left sidebar)
         self.controls = Controls()
-        self.controls.setFixedWidth(320)
+        self.controls.setFixedWidth(420)
         
         # Canvas panel (main area)
         self.canvas = Canvas()
@@ -40,7 +40,7 @@ class MainWindow(QMainWindow):
         self.splitter.addWidget(self.canvas)
         
         # Set initial sizes (controls: 350px, canvas: rest)
-        self.splitter.setSizes([350, 850])
+        self.splitter.setSizes([420, 780])
         
         # Add splitter to main layout
         self.layout.addWidget(self.splitter)
@@ -127,6 +127,14 @@ class MainWindow(QMainWindow):
         print("Structure cleared")
 
     def handle_analyze(self):
+        from src.pef_analyzer.core.solver import Solver # Importe no topo do arquivo ou aqui
+        
+        # Roda a matriz de rigidez e acha as reações
+        motor = Solver(self.canvas.nodes, self.canvas.bars)
+        motor.analyze_structure()
+        
+        # Atualiza a tela e mostra os gráficos
+        self.canvas.update()
         self.canvas.show_effort_graphs()
         print("Analyzing effort distribution along bars")
 
