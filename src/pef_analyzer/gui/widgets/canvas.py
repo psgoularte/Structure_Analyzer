@@ -39,6 +39,15 @@ class Canvas(QWidget):
 
         self._last_mouse_pos = None
         self._mouse_button = None
+       
+        self._last_mouse_pos = None
+        self._mouse_button = None
+
+        # --- NOVAS VARIÁVEIS PARA ARRASTAR AS LABELS ---
+        self.label_offsets = {}      # Guarda os deslocamentos {bar_id: QPointF}
+        self.label_rects = {}        # Guarda as zonas de colisão {bar_id: QRectF}
+        self._dragging_label_id = None
+        self._label_drag_start = None
 
     # criação via API
     def add_node(self, x: float, y: float, z: float = 0.0) -> int:
@@ -114,9 +123,13 @@ class Canvas(QWidget):
         self.update()
 
     def _recalculate_all_efforts(self):
-        """Recalculate efforts for all bars when any change occurs."""
-        for bar in self.bars:
-            compute_bar_results(bar, self.nodes)
+        """Recalcula a matriz de rigidez e os esforços para toda a estrutura."""
+        from ...core.solver import Solver
+        
+        # Só tenta resolver se houver pelo menos um nó e uma barra
+        if self.nodes and self.bars:
+            motor = Solver(self.nodes, self.bars)
+            motor.analyze_structure()
 
     def clear_structure(self):
         """Clear all nodes, bars, and loads from the structure."""
@@ -295,35 +308,72 @@ class Canvas(QWidget):
 
     # interação: pan (left), rotate XY/Z (right), rotate Y (middle), zoom wheel
     def mousePressEvent(self, ev):
-        self._last_mouse_pos = ev.position()
+        click_pos = ev.position()
+        
+        # 1. Verifica se clicou dentro de alguma label de resultado
+        for bid, rect in reversed(list(self.label_rects.items())):
+            if rect.contains(click_pos):
+                self._dragging_label_id = bid
+                self._label_drag_start = click_pos
+                self._mouse_button = None # Evita girar a câmera
+                return
+
+        # 2. Se não clicou na label, segue o comportamento original
+        self._last_mouse_pos = click_pos
         self._mouse_button = ev.button()
 
     def mouseMoveEvent(self, ev):
-        if self._last_mouse_pos is None:
-            self._last_mouse_pos = ev.position()
-            return
         cur = ev.position()
+
+        # 1. Lógica de arrastar a label (Resultados)
+        if self._dragging_label_id is not None:
+            dx = cur.x() - self._label_drag_start.x()
+            dy = cur.y() - self._label_drag_start.y()
+            
+            old_offset = self.label_offsets.get(self._dragging_label_id, QPointF(0, 0))
+            self.label_offsets[self._dragging_label_id] = QPointF(old_offset.x() + dx, old_offset.y() + dy)
+            
+            self._label_drag_start = cur
+            self.update()
+            return
+
+        # 2. Lógica de movimentação da câmera 3D
+        if self._last_mouse_pos is None:
+            self._last_mouse_pos = cur
+            return
+            
         dx = cur.x() - self._last_mouse_pos.x()
         dy = cur.y() - self._last_mouse_pos.y()
 
-        if self._mouse_button == Qt.MouseButton.LeftButton:
+        if self._mouse_button == Qt.MouseButton.MiddleButton:
+            # ORBIT 3D (CAD Style): Gira a estrutura livremente
+            self.angle_y += dx * 0.4  # Mouse pros lados = gira ao redor do eixo Y
+            self.angle_x += dy * 0.4  # Mouse pra cima/baixo = gira ao redor do eixo X
+            
+            # Limita o eixo X a 89 graus para a estrutura não dar cambalhota e bugar a câmera
+            self.angle_x = max(-89.0, min(89.0, self.angle_x))
+            self.update()
+            
+        elif self._mouse_button == Qt.MouseButton.LeftButton:
+            # PAN: Desliza o plano inteiro pela tela
             self.pan_x += dx
             self.pan_y += dy
             self.update()
+            
         elif self._mouse_button == Qt.MouseButton.RightButton:
-            # horizontal -> roll (z), vertical -> pitch (x)
+            # ROLL: Gira como um volante (ao redor do eixo Z da tela)
             self.angle_z += dx * 0.4
-            self.angle_x += dy * 0.35
-            self.angle_x = max(-89.0, min(89.0, self.angle_x))
-            self.update()
-        elif self._mouse_button == Qt.MouseButton.MiddleButton:
-            # middle drag rotates yaw (around Y)
-            self.angle_y += dx * 0.4
             self.update()
 
         self._last_mouse_pos = cur
 
     def mouseReleaseEvent(self, ev):
+        # Soltar a label
+        if self._dragging_label_id is not None:
+            self._dragging_label_id = None
+            self._label_drag_start = None
+            return
+            
         self._last_mouse_pos = None
         self._mouse_button = None
 
@@ -667,7 +717,6 @@ class Canvas(QWidget):
 
     def _draw_result_label(self, painter, pos, results, bar_id):
         """Draw detailed effort diagram on bar with all 3D effort types and max values."""
-        # Get all 3D effort values
         N = results.get('N', 0.0)
         Vy = results.get('Vy', 0.0)
         Vz = results.get('Vz', 0.0)
@@ -675,7 +724,6 @@ class Canvas(QWidget):
         Mz = results.get('Mz', 0.0)
         T = results.get('T', 0.0)
         
-        # Create detailed diagram with all effort types
         lines = [
             f"━━━ BAR #{bar_id} ━━━",
             f"🔴 N:  {N:+.2f} kN",
@@ -686,44 +734,47 @@ class Canvas(QWidget):
             f"🟣 T:  {T:+.2f} kN·m"
         ]
         
-        # Background for label
         painter.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
         font_metrics = painter.fontMetrics()
         max_width = max(font_metrics.horizontalAdvance(line) for line in lines)
         text_height = font_metrics.height() * len(lines)
         
-        # Position label above bar with offset (increased distance for better visualization)
-        label_x = pos.x() - max_width / 2
-        label_y = pos.y() - text_height - 90
+        # Aplica o deslocamento do mouse (se a label tiver sido arrastada)
+        custom_offset = self.label_offsets.get(bar_id, QPointF(0, 0))
+        
+        label_x = pos.x() - max_width / 2 + custom_offset.x()
+        label_y = pos.y() - text_height - 90 + custom_offset.y()
         
         bg_rect = QRectF(label_x - 8, label_y - 8, max_width + 16, text_height + 16)
+        
+        # Salva o retângulo para sabermos se o mouse clicou aqui dentro
+        self.label_rects[bar_id] = bg_rect
+        
         painter.setPen(Qt.PenStyle.NoPen)
         bg_color = QColor("#1e1e2e")
         bg_color.setAlpha(240)
         painter.setBrush(bg_color)
         painter.drawRoundedRect(bg_rect, 8, 8)
         
-        # Border
         painter.setPen(QPen(QColor("#89b4fa"), 2))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawRoundedRect(bg_rect, 8, 8)
         
-        # Text with color coding
         y_offset = label_y + font_metrics.height() - 2
         for i, line in enumerate(lines):
-            if i == 0:  # Header
+            if i == 0:
                 color = QColor("#cdd6f4")
                 painter.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
-            elif i == 1:  # N (Axial)
+            elif i == 1:
                 color = QColor("#f38ba8")
                 painter.setFont(QFont("Segoe UI", 8, QFont.Weight.Normal))
-            elif i in [2, 3]:  # Vy, Vz (Shear)
+            elif i in [2, 3]:
                 color = QColor("#a6e3a1")
                 painter.setFont(QFont("Segoe UI", 8, QFont.Weight.Normal))
-            elif i in [4, 5]:  # My, Mz (Moment)
+            elif i in [4, 5]:
                 color = QColor("#89b4fa")
                 painter.setFont(QFont("Segoe UI", 8, QFont.Weight.Normal))
-            else:  # T (Torque)
+            else:
                 color = QColor("#cba6f7")
                 painter.setFont(QFont("Segoe UI", 8, QFont.Weight.Normal))
             

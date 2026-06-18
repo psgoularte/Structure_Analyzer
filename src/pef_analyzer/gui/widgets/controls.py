@@ -1,16 +1,17 @@
 """
 Módulo Controls - Elementos de interface do usuário para interação com a aplicação.
+Remodelado com abas e layouts em grade para melhor usabilidade (UX).
 """
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QPushButton, QSlider, QLabel,
     QHBoxLayout, QLineEdit, QComboBox, QGroupBox, QFrame,
-    QScrollArea, QSizePolicy
+    QScrollArea, QSizePolicy, QTabWidget, QGridLayout
 )
 
 
 class Controls(QWidget):
-    # sinais enviam dicionário com parâmetros (ou valores simples)
+    # Sinais enviam dicionário com parâmetros (mantidos idênticos para compatibilidade)
     signal_add_node = pyqtSignal(object)
     signal_add_bar = pyqtSignal(object)
     signal_add_support = pyqtSignal(object)
@@ -26,101 +27,88 @@ class Controls(QWidget):
         self.init_ui()
 
     def init_ui(self):
-        # Create scroll area for controls
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
-        # RightToLeft on the scroll area moves the vertical scrollbar to the left side,
-        # keeping it out of the way of the content on the right.
-        scroll.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-
-        # Main container widget — reset direction so text/widgets stay left-to-right
-        container = QWidget()
-        container.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
-        container_layout = QVBoxLayout(container)
-        container_layout.setSpacing(16)
-        container_layout.setContentsMargins(48, 16, 16, 16)
-        
-        # Add Node Section
-        node_group = self.create_node_section()
-        container_layout.addWidget(node_group)
-        
-        # Add Bar Section
-        bar_group = self.create_bar_section()
-        container_layout.addWidget(bar_group)
-        
-        # Support Section
-        support_group = self.create_support_section()
-        container_layout.addWidget(support_group)
-        
-        # Point Load Section
-        point_load_group = self.create_point_load_section()
-        container_layout.addWidget(point_load_group)
-        
-        # Distributed Load Section
-        dist_load_group = self.create_dist_load_section()
-        container_layout.addWidget(dist_load_group)
-        
-        # Node Moment Section
-        moment_group = self.create_node_moment_section()
-        container_layout.addWidget(moment_group)
-        
-        # Clear Section
-        clear_group = self.create_clear_section()
-        container_layout.addWidget(clear_group)
-        
-        # Add stretch to push everything to top
-        container_layout.addStretch()
-        
-        scroll.setWidget(container)
-        
-        # Main layout
+        # Layout principal vertical do painel de controle
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.addWidget(scroll)
+        main_layout.setContentsMargins(12, 12, 12, 12)
+        main_layout.setSpacing(12)
+
+        # Criar o Widget de Abas (Tabs) para organizar o fluxo de modelagem
+        self.tabs = QTabWidget()
+
+        #TAB 1: GEOMETRIA (Nós e Barras)
+        geom_tab = QWidget()
+        geom_layout = QVBoxLayout(geom_tab)
+        geom_layout.setSpacing(12)
+        geom_layout.setContentsMargins(4, 8, 4, 4)
+        geom_layout.addWidget(self.create_node_section())
+        geom_layout.addWidget(self.create_bar_section())
+        geom_layout.addStretch()  # Empurra o conteúdo para o topo
+        self.tabs.addTab(geom_tab, "Geometria")
+
+        # TAB 2: RESTRIÇÕES (Apoios e Vínculos)
+        rest_tab = QWidget()
+        rest_layout = QVBoxLayout(rest_tab)
+        rest_layout.setSpacing(12)
+        rest_layout.setContentsMargins(4, 8, 4, 4)
+        rest_layout.addWidget(self.create_support_section())
+        rest_layout.addStretch()
+        self.tabs.addTab(rest_tab, "Restrições")
+
+        #TAB 3: CARGAS (Pontuais, Distribuídas e Momentos) com ScrollArea dedicado
+        loads_scroll = QScrollArea()
+        loads_scroll.setWidgetResizable(True)
+        loads_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        loads_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        loads_container = QWidget()
+        loads_layout = QVBoxLayout(loads_container)
+        loads_layout.setSpacing(12)
+        loads_layout.setContentsMargins(4, 8, 4, 4)
+        loads_layout.addWidget(self.create_point_load_section())
+        loads_layout.addWidget(self.create_dist_load_section())
+        loads_layout.addWidget(self.create_node_moment_section())
+        loads_layout.addStretch()
+
+        loads_scroll.setWidget(loads_container)
+        self.tabs.addTab(loads_scroll, "Cargas")
+
+        # Adiciona o bloco de abas ao layout principal
+        main_layout.addWidget(self.tabs)
+
+        # SEÇÃO DE AÇÕES (Fixa permanentemente no rodapé)
+        actions_group = self.create_clear_section()
+        main_layout.addWidget(actions_group)
+
         self.setLayout(main_layout)
 
     def create_node_section(self):
         group = QGroupBox("Add Node")
         group.setProperty("class", "section-title")
         layout = QVBoxLayout()
-        layout.setSpacing(8)
         
-        # Coordinates input row
-        coord_layout = QHBoxLayout()
-        coord_layout.setSpacing(6)
+        grid = QGridLayout()
+        grid.setSpacing(8)
         
         self.x_input = QLineEdit("0")
-        self.x_input.setPlaceholderText("Ex: 0.0")
-        self.x_input.setMaximumWidth(60)
-        
+        self.x_input.setPlaceholderText("0.0")
         self.y_input = QLineEdit("0")
-        self.y_input.setPlaceholderText("Ex: 0.0")
-        self.y_input.setMaximumWidth(60)
-        
+        self.y_input.setPlaceholderText("0.0")
         self.z_input = QLineEdit("0")
-        self.z_input.setPlaceholderText("Ex: 0.0")
-        self.z_input.setMaximumWidth(60)
+        self.z_input.setPlaceholderText("0.0")
         
-        coord_layout.addWidget(QLabel("X:"))
-        coord_layout.addWidget(self.x_input)
-        coord_layout.addWidget(QLabel("Y:"))
-        coord_layout.addWidget(self.y_input)
-        coord_layout.addWidget(QLabel("Z:"))
-        coord_layout.addWidget(self.z_input)
+        grid.addWidget(QLabel("X (m):"), 0, 0)
+        grid.addWidget(self.x_input, 0, 1)
+        grid.addWidget(QLabel("Y (m):"), 0, 2)
+        grid.addWidget(self.y_input, 0, 3)
+        grid.addWidget(QLabel("Z (m):"), 1, 0)
+        grid.addWidget(self.z_input, 1, 1)
         
         self.btn_add_node = QPushButton("Add Node")
         self.btn_add_node.setProperty("class", "primary")
         self.btn_add_node.clicked.connect(self.on_add_node)
         
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
-        button_layout.addWidget(self.btn_add_node)
-        
-        layout.addLayout(coord_layout)
-        layout.addLayout(button_layout)
+        layout.addLayout(grid)
+        layout.addWidget(self.btn_add_node, alignment=Qt.AlignmentFlag.AlignRight)
         group.setLayout(layout)
         return group
 
@@ -128,35 +116,26 @@ class Controls(QWidget):
         group = QGroupBox("Add Bar")
         group.setProperty("class", "section-title")
         layout = QVBoxLayout()
-        layout.setSpacing(8)
         
-        # Bar input row
-        bar_layout = QHBoxLayout()
-        bar_layout.setSpacing(6)
+        grid = QGridLayout()
+        grid.setSpacing(8)
         
         self.i_input = QLineEdit("0")
-        self.i_input.setPlaceholderText("Ex: 0")
-        self.i_input.setMaximumWidth(50)
-        
+        self.i_input.setPlaceholderText("0")
         self.j_input = QLineEdit("1")
-        self.j_input.setPlaceholderText("Ex: 1")
-        self.j_input.setMaximumWidth(50)
+        self.j_input.setPlaceholderText("1")
         
-        bar_layout.addWidget(QLabel("Node i:"))
-        bar_layout.addWidget(self.i_input)
-        bar_layout.addWidget(QLabel("j:"))
-        bar_layout.addWidget(self.j_input)
+        grid.addWidget(QLabel("Node i (Início):"), 0, 0)
+        grid.addWidget(self.i_input, 0, 1)
+        grid.addWidget(QLabel("Node j (Fim):"), 0, 2)
+        grid.addWidget(self.j_input, 0, 3)
         
         self.btn_add_bar = QPushButton("Add Bar")
         self.btn_add_bar.setProperty("class", "primary")
         self.btn_add_bar.clicked.connect(self.on_add_bar)
         
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
-        button_layout.addWidget(self.btn_add_bar)
-        
-        layout.addLayout(bar_layout)
-        layout.addLayout(button_layout)
+        layout.addLayout(grid)
+        layout.addWidget(self.btn_add_bar, alignment=Qt.AlignmentFlag.AlignRight)
         group.setLayout(layout)
         return group
 
@@ -164,34 +143,26 @@ class Controls(QWidget):
         group = QGroupBox("Set Support")
         group.setProperty("class", "section-title")
         layout = QVBoxLayout()
-        layout.setSpacing(8)
         
-        # Support input row
-        support_layout = QHBoxLayout()
-        support_layout.setSpacing(6)
+        grid = QGridLayout()
+        grid.setSpacing(8)
         
         self.sup_node = QLineEdit("0")
-        self.sup_node.setPlaceholderText("Ex: 0")
-        self.sup_node.setMaximumWidth(50)
-        
+        self.sup_node.setPlaceholderText("0")
         self.sup_type = QComboBox()
         self.sup_type.addItems(["none", "roller", "pinned", "fixed"])
         
-        support_layout.addWidget(QLabel("Node:"))
-        support_layout.addWidget(self.sup_node)
-        support_layout.addWidget(QLabel("Type:"))
-        support_layout.addWidget(self.sup_type)
+        grid.addWidget(QLabel("Node ID:"), 0, 0)
+        grid.addWidget(self.sup_node, 0, 1)
+        grid.addWidget(QLabel("Support Type:"), 0, 2)
+        grid.addWidget(self.sup_type, 0, 3)
         
-        self.btn_add_sup = QPushButton("Apply")
+        self.btn_add_sup = QPushButton("Apply Support")
         self.btn_add_sup.setProperty("class", "primary")
         self.btn_add_sup.clicked.connect(self.on_add_support)
         
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
-        button_layout.addWidget(self.btn_add_sup)
-        
-        layout.addLayout(support_layout)
-        layout.addLayout(button_layout)
+        layout.addLayout(grid)
+        layout.addWidget(self.btn_add_sup, alignment=Qt.AlignmentFlag.AlignRight)
         group.setLayout(layout)
         return group
 
@@ -199,52 +170,34 @@ class Controls(QWidget):
         group = QGroupBox("Point Load")
         group.setProperty("class", "section-title")
         layout = QVBoxLayout()
-        layout.setSpacing(8)
 
-        # Single row: [Bar: input] --- gap --- [Vx] [Vy] [Vz] --- gap --- [dist]
-        input_row = QHBoxLayout()
-        input_row.setSpacing(4)
+        grid = QGridLayout()
+        grid.setSpacing(8)
 
         self.load_bar = QLineEdit("0")
-        self.load_bar.setPlaceholderText("Ex: 0")
-        self.load_bar.setMaximumWidth(45)
-
-        self.load_vx = QLineEdit("0")
-        self.load_vx.setPlaceholderText("Vx")
-        self.load_vx.setMaximumWidth(45)
-
-        self.load_vy = QLineEdit("0")
-        self.load_vy.setPlaceholderText("Vy")
-        self.load_vy.setMaximumWidth(45)
-
-        self.load_vz = QLineEdit("0")
-        self.load_vz.setPlaceholderText("Vz")
-        self.load_vz.setMaximumWidth(45)
-
         self.load_distance = QLineEdit("0")
-        self.load_distance.setPlaceholderText("d")
-        self.load_distance.setMaximumWidth(45)
+        self.load_vx = QLineEdit("0")
+        self.load_vy = QLineEdit("0")
+        self.load_vz = QLineEdit("0")
 
-        input_row.addWidget(QLabel("Bar:"))
-        input_row.addWidget(self.load_bar)
-        input_row.addSpacing(14)
-        input_row.addWidget(self.load_vx)
-        input_row.addWidget(self.load_vy)
-        input_row.addWidget(self.load_vz)
-        input_row.addSpacing(14)
-        input_row.addWidget(self.load_distance)
-        input_row.addStretch()
+        grid.addWidget(QLabel("Bar ID:"), 0, 0)
+        grid.addWidget(self.load_bar, 0, 1)
+        grid.addWidget(QLabel("Dist. (m):"), 0, 2)
+        grid.addWidget(self.load_distance, 0, 3)
 
-        self.btn_add_load = QPushButton("Add Load")
+        grid.addWidget(QLabel("Vx (kN):"), 1, 0)
+        grid.addWidget(self.load_vx, 1, 1)
+        grid.addWidget(QLabel("Vy (kN):"), 1, 2)
+        grid.addWidget(self.load_vy, 1, 3)
+        grid.addWidget(QLabel("Vz (kN):"), 2, 0)
+        grid.addWidget(self.load_vz, 2, 1)
+
+        self.btn_add_load = QPushButton("Add Point Load")
         self.btn_add_load.setProperty("class", "primary")
         self.btn_add_load.clicked.connect(self.on_add_point_load)
 
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
-        button_layout.addWidget(self.btn_add_load)
-
-        layout.addLayout(input_row)
-        layout.addLayout(button_layout)
+        layout.addLayout(grid)
+        layout.addWidget(self.btn_add_load, alignment=Qt.AlignmentFlag.AlignRight)
         group.setLayout(layout)
         return group
     
@@ -252,46 +205,31 @@ class Controls(QWidget):
         group = QGroupBox("Node Moment")
         group.setProperty("class", "section-title")
         layout = QVBoxLayout()
-        layout.setSpacing(8)
 
-        # Single row: [Node: input] --- gap --- [Mx] [My] [Mz]
-        input_row = QHBoxLayout()
-        input_row.setSpacing(4)
+        grid = QGridLayout()
+        grid.setSpacing(8)
 
         self.moment_node = QLineEdit("0")
-        self.moment_node.setPlaceholderText("Ex: 0")
-        self.moment_node.setMaximumWidth(45)
-
         self.moment_mx = QLineEdit("0")
-        self.moment_mx.setPlaceholderText("Mx")
-        self.moment_mx.setMaximumWidth(45)
-
         self.moment_my = QLineEdit("0")
-        self.moment_my.setPlaceholderText("My")
-        self.moment_my.setMaximumWidth(45)
-
         self.moment_mz = QLineEdit("0")
-        self.moment_mz.setPlaceholderText("Mz")
-        self.moment_mz.setMaximumWidth(45)
 
-        input_row.addWidget(QLabel("Node:"))
-        input_row.addWidget(self.moment_node)
-        input_row.addSpacing(14)
-        input_row.addWidget(self.moment_mx)
-        input_row.addWidget(self.moment_my)
-        input_row.addWidget(self.moment_mz)
-        input_row.addStretch()
+        grid.addWidget(QLabel("Node ID:"), 0, 0)
+        grid.addWidget(self.moment_node, 0, 1)
+
+        grid.addWidget(QLabel("Mx (kN·m):"), 1, 0)
+        grid.addWidget(self.moment_mx, 1, 1)
+        grid.addWidget(QLabel("My (kN·m):"), 1, 2)
+        grid.addWidget(self.moment_my, 1, 3)
+        grid.addWidget(QLabel("Mz (kN·m):"), 2, 0)
+        grid.addWidget(self.moment_mz, 2, 1)
 
         self.btn_add_moment = QPushButton("Add Moment")
         self.btn_add_moment.setProperty("class", "primary")
         self.btn_add_moment.clicked.connect(self.on_add_node_moment)
 
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
-        button_layout.addWidget(self.btn_add_moment)
-
-        layout.addLayout(input_row)
-        layout.addLayout(button_layout)
+        layout.addLayout(grid)
+        layout.addWidget(self.btn_add_moment, alignment=Qt.AlignmentFlag.AlignRight)
         group.setLayout(layout)
         return group
 
@@ -299,69 +237,70 @@ class Controls(QWidget):
         group = QGroupBox("Distributed Load")
         group.setProperty("class", "section-title")
         layout = QVBoxLayout()
-        layout.setSpacing(8)
         
-        # Dist load input row
-        dload_layout = QHBoxLayout()
-        dload_layout.setSpacing(6)
+        grid = QGridLayout()
+        grid.setSpacing(8)
         
         self.dload_bar = QLineEdit("0")
-        self.dload_bar.setPlaceholderText("Ex: 0")
-        self.dload_bar.setMaximumWidth(45)
-        
         self.dload_dir = QComboBox()
         self.dload_dir.addItems(["vx", "vy", "vz", "perpendicular"])
-        self.dload_dir.setMaximumWidth(100)
-        
-        dload_layout.addWidget(QLabel("Bar:"))
-        dload_layout.addWidget(self.dload_bar)
-        dload_layout.addWidget(QLabel("Dir:"))
-        dload_layout.addWidget(self.dload_dir)
-        
-        # Expression row
-        expr_layout = QHBoxLayout()
-        expr_layout.setSpacing(6)
         self.dload_expr = QLineEdit("0")
-        self.dload_expr.setPlaceholderText("Ex: 10*t")
-        expr_layout.addWidget(QLabel("Expr:"))
-        expr_layout.addWidget(self.dload_expr)
         
-        self.btn_add_dload = QPushButton("Add Load")
+        grid.addWidget(QLabel("Bar ID:"), 0, 0)
+        grid.addWidget(self.dload_bar, 0, 1)
+        grid.addWidget(QLabel("Direction:"), 0, 2)
+        grid.addWidget(self.dload_dir, 0, 3)
+        
+        grid.addWidget(QLabel("Expression:"), 1, 0)
+        grid.addWidget(self.dload_expr, 1, 1, 1, 3)  # Expande a caixa pelas colunas restantes
+        
+        self.btn_add_dload = QPushButton("Add Dist Load")
         self.btn_add_dload.setProperty("class", "primary")
         self.btn_add_dload.clicked.connect(self.on_add_dist_load)
         
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
-        button_layout.addWidget(self.btn_add_dload)
+        layout.addLayout(grid)
+        layout.addWidget(self.btn_add_dload, alignment=Qt.AlignmentFlag.AlignRight)
+        group.setLayout(layout)
+        return group
+
+    def create_clear_section(self):
+        group = QGroupBox("Actions")
+        group.setProperty("class", "section-title")
+        layout = QVBoxLayout()
+        layout.setSpacing(8)
         
-        layout.addLayout(dload_layout)
-        layout.addLayout(expr_layout)
+        self.btn_analyze = QPushButton("Analyze Structure")
+        self.btn_analyze.setProperty("class", "primary")
+        self.btn_analyze.clicked.connect(self.on_analyze)
+        
+        self.btn_clear = QPushButton("Clear All")
+        self.btn_clear.setProperty("class", "danger")
+        self.btn_clear.clicked.connect(self.on_clear)
+        
+        button_layout = QHBoxLayout()
+        button_layout.addWidget(self.btn_analyze)
+        button_layout.addWidget(self.btn_clear)
+        
         layout.addLayout(button_layout)
         group.setLayout(layout)
         return group
 
+    # ── MÉTODOS AUXILIARES E DE VALIDAÇÃO (MANTIDOS 100% INTACTOS) ──────────
     def _safe_float(self, lineedit, default=0.0):
-        try:
-            return float(lineedit.text())
-        except Exception:
-            return default
+        try: return float(lineedit.text())
+        except Exception: return default
 
     def _safe_int(self, lineedit, default=0):
-        try:
-            return int(lineedit.text())
-        except Exception:
-            return default
+        try: return int(lineedit.text())
+        except Exception: return default
 
     def _mark_err(self, *fields):
-        for f in fields:
-            f.setStyleSheet("border: 2px solid #f38ba8; border-radius: 4px;")
+        for f in fields: f.setStyleSheet("border: 2px solid #f38ba8; border-radius: 4px;")
 
     def _mark_ok(self, *fields):
-        for f in fields:
-            f.setStyleSheet("")
+        for f in fields: f.setStyleSheet("")
 
     def _try_float(self, field):
-        """Return (value, True) or (0.0, False) and highlight field red on failure."""
         text = field.text().strip()
         if not text:
             self._mark_err(field)
@@ -466,30 +405,5 @@ class Controls(QWidget):
             return
         self.signal_add_node_moment.emit({"node": node, "mx": mx, "my": my, "mz": mz})
 
-    def create_clear_section(self):
-        group = QGroupBox("Actions")
-        group.setProperty("class", "section-title")
-        layout = QVBoxLayout()
-        layout.setSpacing(8)
-        
-        self.btn_analyze = QPushButton("Analyze")
-        self.btn_analyze.setProperty("class", "primary")
-        self.btn_analyze.clicked.connect(self.on_analyze)
-        
-        self.btn_clear = QPushButton("Clear All")
-        self.btn_clear.setProperty("class", "danger")
-        self.btn_clear.clicked.connect(self.on_clear)
-        
-        button_layout = QHBoxLayout()
-        button_layout.addWidget(self.btn_analyze)
-        button_layout.addWidget(self.btn_clear)
-        
-        layout.addLayout(button_layout)
-        group.setLayout(layout)
-        return group
-
-    def on_clear(self):
-        self.signal_clear.emit()
-
-    def on_analyze(self):
-        self.signal_analyze.emit()
+    def on_clear(self): self.signal_clear.emit()
+    def on_analyze(self): self.signal_analyze.emit()
