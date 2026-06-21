@@ -174,7 +174,15 @@ class Canvas(QWidget):
             ax3 = fig.add_subplot(313)
             
             # Calculate effort distribution along the bar using the functions
+            # Calculate bar length
+            dx = nj.x - ni.x
+            dy = nj.y - ni.y
+            dz = nj.z - ni.z
+            L = (dx*dx + dy*dy + dz*dz)**0.5 or 1.0
+            
+            # t_values normalized (0 to 1), x_values in meters (0 to L)
             t_values = np.linspace(0, 1, 100)
+            x_values = t_values * L  # Position in meters along the bar
             
             # Get effort functions if available
             N_func = bar.results.get('N_func')
@@ -216,25 +224,25 @@ class Canvas(QWidget):
                 T_values = [bar.results.get('T', 0.0)] * len(t_values)
             
             # Plot Axial force N
-            ax1.plot(t_values, N_values, 'r-', label='N (Axial)', linewidth=2)
+            ax1.plot(x_values, N_values, 'r-', label='N (Axial)', linewidth=2)
             ax1.set_ylabel('Force (kN)')
             ax1.set_title(f'Bar #{bar.id} - Node {bar.node_i} to Node {bar.node_j} - Axial Force')
             ax1.legend()
             ax1.grid(True, alpha=0.3)
             
             # Plot Shear forces Vy, Vz
-            ax2.plot(t_values, Vy_values, 'g-', label='Vy (Shear Y)', linewidth=2)
-            ax2.plot(t_values, Vz_values, 'c-', label='Vz (Shear Z)', linewidth=2)
+            ax2.plot(x_values, Vy_values, 'g-', label='Vy (Shear Y)', linewidth=2)
+            ax2.plot(x_values, Vz_values, 'c-', label='Vz (Shear Z)', linewidth=2)
             ax2.set_ylabel('Force (kN)')
             ax2.set_title('Shear Forces')
             ax2.legend()
             ax2.grid(True, alpha=0.3)
             
             # Plot Moments My, Mz and Torque T
-            ax3.plot(t_values, My_values, 'b-', label='My (Moment Y)', linewidth=2)
-            ax3.plot(t_values, Mz_values, 'm-', label='Mz (Moment Z)', linewidth=2)
-            ax3.plot(t_values, T_values, 'purple', label='T (Torque)', linewidth=2, linestyle='--')
-            ax3.set_xlabel('Position along bar (t: 0→1)')
+            ax3.plot(x_values, My_values, 'b-', label='My (Moment Y)', linewidth=2)
+            ax3.plot(x_values, Mz_values, 'm-', label='Mz (Moment Z)', linewidth=2)
+            ax3.plot(x_values, T_values, 'purple', label='T (Torque)', linewidth=2, linestyle='--')
+            ax3.set_xlabel(f'Position along bar (0 → {L:.1f} m)')
             ax3.set_ylabel('Moment (kN·m)')
             ax3.set_title('Moments and Torque')
             ax3.legend()

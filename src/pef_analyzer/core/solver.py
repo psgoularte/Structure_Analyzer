@@ -164,11 +164,11 @@ def compute_bar_results(bar: Bar, nodes: List[Node]):
         return -total
 
     def T(t):
-        """Torção: momentos nos dois nós projetados no eixo axial.
+        """Torção: momentos nos dois nós projetados no eixo axial (negativo pela convenção de seção esquerda).
         ni_T entra para t > 0; nj_T entra apenas em t = 1 (está à direita das secções internas)."""
-        total = ni_T
+        total = ni_T  # Torção inicial no nó i
         if t >= 1.0:
-            total += nj_T
+            total += nj_T  # Torção do nó j (apenas na seção final)
         return -total
 
     # Pré-computar arrays para integração trapezoidal de My e Mz
@@ -201,8 +201,11 @@ def compute_bar_results(bar: Bar, nodes: List[Node]):
     Vy_s = [_Vy_smooth(t) for t in ts]
     Vz_s = [_Vz_smooth(t) for t in ts]
 
-    My_arr = [-ni_My]
-    Mz_arr = [-ni_Mz]
+    # Condição de contorno: Momentos iniciais em cada direção
+    # Convenção: esforço interno = –(somatório do lado esquerdo)
+    # Se não há momento no nó i, o valor começa em zero
+    My_arr = [-ni_My]  # Momento inicial em Y (negativo pela convenção de seção esquerda)
+    Mz_arr = [-ni_Mz]  # Momento inicial em Z (negativo pela convenção de seção esquerda)
     for k in range(1, NS):
         dt = ts[k] - ts[k-1]
         My_arr.append(My_arr[-1] + 0.5 * (Vz_s[k-1] + Vz_s[k]) * dt * L)
